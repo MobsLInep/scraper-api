@@ -48,14 +48,15 @@ def process_post(post):
             a.replace_with(a.get_text(strip=True))
         # Make image src absolute
         for img in content_div.find_all('img'):
-            img['src'] = urljoin(BASE_URL, img['src'])
+            if img.has_attr('src'):
+                img['src'] = urljoin(BASE_URL, img['src'])
         description = str(content_div)
     else:
         description = ""
     # Side pic (first image in post, if any)
     side_pic = None
     img = post.find('img')
-    if img and img.get('src'):
+    if img and img.has_attr('src'):
         side_pic = urljoin(BASE_URL, img['src'])
     return {
         "title": title,
@@ -75,5 +76,3 @@ def get_posts():
         for post in page_content.find_all('div', class_='topic'):
             posts.append(process_post(post))
     return JSONResponse(posts)
-
-# For local dev: uvicorn main:app --reload 
