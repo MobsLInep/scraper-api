@@ -22,13 +22,15 @@ USER_CLASS_TO_TAG = {
     'user-admin': 'admin',
 }
 
-# Health check endpoint for UptimeRobot
+# Health check endpoint for UptimeRobot (supports both GET and HEAD)
 @app.get("/health")
+@app.head("/health")
 def health_check():
     return {"status": "healthy", "service": "codeforces-scraper"}
 
-# Root endpoint
+# Root endpoint (supports both GET and HEAD)
 @app.get("/")
+@app.head("/")
 def read_root():
     return {"message": "Codeforces Scraper API", "endpoints": ["/health", "/api/posts"]}
 
