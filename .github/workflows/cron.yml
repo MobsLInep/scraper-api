@@ -2,7 +2,8 @@ name: Render Cron Trigger
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Every 5 minutes (UTC)
+    - cron: '*/5 * * * *'
+  workflow_dispatch:  # Add this for manual testing
 
 jobs:
   ping-render:
