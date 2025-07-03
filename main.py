@@ -130,3 +130,11 @@ async def send_test_notification(payload: SendTestNotificationRequest):
         return {"status": "success", "message": "Notification sent", "firebase_response": response}
     except Exception as e:
         return {"status": "error", "details": str(e)}, 500
+
+@app.post("/api/cron")
+async def cron_trigger():
+    # Your logic to check for upcoming contests and send notifications
+    # For demo, just print/log
+    print("Cron job triggered!")
+    # TODO: Add your contest notification logic here
+    return {"status": "ok"}
