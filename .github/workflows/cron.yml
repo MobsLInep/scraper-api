@@ -1,0 +1,13 @@
+name: Render Cron Trigger
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # Every 5 minutes (UTC)
+
+jobs:
+  ping-render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render backend
+        run: |
+          curl -X POST https://scraper-api-j7tm.onrender.com/api/cron
