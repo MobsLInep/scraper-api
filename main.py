@@ -1,14 +1,24 @@
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from fastapi import Request
+from pydantic import BaseModel
 import cloudscraper
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import re
+import os
+
+import firebase_admin
+from firebase_admin import credentials, messaging
 
 app = FastAPI()
 BASE_URL = "https://codeforces.com"
 
-# Helper to process user profile links into tags
+FIREBASE_CRED_PATH = "/etc/secrets/serviceAccountKey.json"
+if not firebase_admin._apps:
+    cred = credentials.Certificate(FIREBASE_CRED_PATH)
+    firebase_admin.initialize_app(cred)
+
 USER_CLASS_TO_TAG = {
     'user-legendary': 'grandmaster',
     'user-red': 'grandmaster',
@@ -22,27 +32,22 @@ USER_CLASS_TO_TAG = {
     'user-admin': 'admin',
 }
 
-# Health check endpoint for UptimeRobot (supports both GET and HEAD)
 @app.get("/health")
 @app.head("/health")
 def health_check():
     return {"status": "healthy", "service": "codeforces-scraper"}
 
-# Root endpoint (supports both GET and HEAD)
 @app.get("/")
 @app.head("/")
 def read_root():
     return {"message": "Codeforces Scraper API", "endpoints": ["/health", "/api/posts"]}
 
 def process_post(post):
-    # Title
     title_div = post.find('div', class_='title')
     title = title_div.get_text(strip=True) if title_div else ""
     
-    # Content
     content_div = post.find('div', class_='content')
     if content_div:
-        # Replace user profile links with tags
         for a in content_div.find_all('a', href=True):
             user_class = a.get('class', [])
             username = a.get_text(strip=True)
@@ -56,11 +61,9 @@ def process_post(post):
             else:
                 a.replace_with(username)
         
-        # Remove all other hyperlinks but keep text
         for a in content_div.find_all('a'):
             a.replace_with(a.get_text(strip=True))
         
-        # Make image src absolute
         for img in content_div.find_all('img'):
             if img.has_attr('src'):
                 img['src'] = urljoin(BASE_URL, img['src'])
@@ -69,7 +72,6 @@ def process_post(post):
     else:
         description = ""
     
-    # Side pic (first image in post, if any)
     side_pic = None
     img = post.find('img')
     if img and img.has_attr('src'):
@@ -96,3 +98,35 @@ def get_posts():
             posts.append(process_post(post))
     
     return JSONResponse(posts)
+
+class RegisterTokenRequest(BaseModel):
+    userId: str
+    fcmToken: str
+    notificationSettings: dict
+
+class SendTestNotificationRequest(BaseModel):
+    fcmToken: str
+    title: str
+    body: str
+    data: dict
+
+@app.post("/api/register-token")
+async def register_token(payload: RegisterTokenRequest):
+    print(f"Registering token for user {payload.userId}: {payload.fcmToken} with settings {payload.notificationSettings}")
+    return {"status": "success", "message": "Token registered (not persisted in demo)"}
+
+@app.post("/api/send-test-notification")
+async def send_test_notification(payload: SendTestNotificationRequest):
+    try:
+        message = messaging.Message(
+            notification=messaging.Notification(
+                title=payload.title,
+                body=payload.body
+            ),
+            data={str(k): str(v) for k, v in payload.data.items()},
+            token=payload.fcmToken
+        )
+        response = messaging.send(message)
+        return {"status": "success", "message": "Notification sent", "firebase_response": response}
+    except Exception as e:
+        return {"status": "error", "details": str(e)}, 500
