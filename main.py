@@ -1,15 +1,13 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import cloudscraper
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-import re
-import os
 import sqlite3
 import firebase_admin
 from firebase_admin import credentials, messaging
-from datetime import datetime, timedelta
+from datetime import datetime
 
 app = FastAPI()
 BASE_URL = "https://codeforces.com"
@@ -26,7 +24,7 @@ def init_db():
     c = conn.cursor()
     c.execute("""
     CREATE TABLE IF NOT EXISTS users (
-        user_id TEXT PRIMARY KEY,
+        device_id TEXT PRIMARY KEY,
         fcm_token TEXT NOT NULL,
         notify_30min INTEGER DEFAULT 1,
         notify_10min INTEGER DEFAULT 1,
@@ -40,14 +38,14 @@ def init_db():
 
 init_db()
 
-def save_user(user_id, fcm_token, settings):
+def save_user(device_id, fcm_token, settings):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
-    INSERT OR REPLACE INTO users (user_id, fcm_token, notify_30min, notify_10min, notify_live, notify_custom, custom_minutes)
+    INSERT OR REPLACE INTO users (device_id, fcm_token, notify_30min, notify_10min, notify_live, notify_custom, custom_minutes)
     VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (
-        user_id,
+        device_id,
         fcm_token,
         int(settings.get("notify30min", True)),
         int(settings.get("notify10min", True)),
@@ -61,7 +59,7 @@ def save_user(user_id, fcm_token, settings):
 def get_all_users():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT user_id, fcm_token, notify_30min, notify_10min, notify_live, notify_custom, custom_minutes FROM users")
+    c.execute("SELECT device_id, fcm_token, notify_30min, notify_10min, notify_live, notify_custom, custom_minutes FROM users")
     users = c.fetchall()
     conn.close()
     return users
@@ -101,7 +99,7 @@ def send_fcm(fcm_token, title, body, data):
         return False, str(e)
 
 class RegisterTokenRequest(BaseModel):
-    userId: str
+    deviceId: str
     fcmToken: str
     notificationSettings: dict
 
@@ -120,6 +118,19 @@ def health_check():
 @app.head("/")
 def read_root():
     return {"message": "Codeforces Scraper API", "endpoints": ["/health", "/api/posts"]}
+
+USER_CLASS_TO_TAG = {
+    'user-legendary': 'grandmaster',
+    'user-red': 'grandmaster',
+    'user-orange': 'master',
+    'user-violet': 'candidate_master',
+    'user-blue': 'expert',
+    'user-cyan': 'specialist',
+    'user-green': 'pupil',
+    'user-gray': 'newbie',
+    'user-black': 'unrated',
+    'user-admin': 'admin',
+}
 
 def process_post(post):
     title_div = post.find('div', class_='title')
@@ -156,19 +167,6 @@ def process_post(post):
         "side_pic": side_pic
     }
 
-USER_CLASS_TO_TAG = {
-    'user-legendary': 'grandmaster',
-    'user-red': 'grandmaster',
-    'user-orange': 'master',
-    'user-violet': 'candidate_master',
-    'user-blue': 'expert',
-    'user-cyan': 'specialist',
-    'user-green': 'pupil',
-    'user-gray': 'newbie',
-    'user-black': 'unrated',
-    'user-admin': 'admin',
-}
-
 @app.get("/api/posts")
 def get_posts():
     url = BASE_URL + "/"
@@ -184,8 +182,7 @@ def get_posts():
 
 @app.post("/api/register-token")
 async def register_token(payload: RegisterTokenRequest):
-    save_user(payload.userId, payload.fcmToken, payload.notificationSettings)
-    print(f"Registered token for user {payload.userId}: {payload.fcmToken} with settings {payload.notificationSettings}")
+    save_user(payload.deviceId, payload.fcmToken, payload.notificationSettings)
     return {"status": "success", "message": "Token registered and settings saved"}
 
 @app.post("/api/send-test-notification")
@@ -196,15 +193,14 @@ async def send_test_notification(payload: SendTestNotificationRequest):
     else:
         return {"status": "error", "details": resp}, 500
 
-@app.post("/api/cron")
+@app.api_route("/api/cron", methods=["GET", "POST"])
 async def cron_trigger():
-    print("Cron job triggered!")
     users = get_all_users()
     contests = get_upcoming_contests()
     now = int(datetime.utcnow().timestamp())
     for contest in contests:
         for user in users:
-            user_id, fcm_token, notify_30min, notify_10min, notify_live, notify_custom, custom_minutes = user
+            device_id, fcm_token, notify_30min, notify_10min, notify_live, notify_custom, custom_minutes = user
             seconds_to_start = contest["startTimeSeconds"] - now
             if notify_30min and 1740 <= seconds_to_start <= 1860:
                 send_fcm(
